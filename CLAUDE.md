@@ -101,7 +101,8 @@ built on top of this codebase** (branch `quanta_trade`): an offline/online quant
 for crypto (BTC/USDT, 1h bars). Implementation lives in the separate top-level package
 `src/quantharness/` (tests in `tests/quantharness/`, run with `pytest tests/quantharness`); it
 depends on the `quant` extra (`pip install -e '.[quant]'`, pandas + numpy). Stage 0 (shared
-feature library, spec in `design/stage0-feature-library.md`) is implemented; Stage 1+ is not.
+feature library, `design/stage0-feature-library.md`) and Stage 1 (deterministic backtest engine,
+rulebook in `design/stage1-backtest-engine.md`) are implemented; Stage 2+ is not.
 Read the full design doc before doing any work related to it; do not re-derive its plan from
 memory since it may be updated. What follows is only a pointer/summary, not a substitute for
 reading it.
@@ -115,6 +116,15 @@ Stage 0 invariants baked into `quantharness` (don't break them):
 - `data.load_ohlcv` uses `float_precision="round_trip"`; the default CSV parser is not bit-exact.
 - Gap policy is fixed in `data.normalize_ohlcv`: missing hourly bars are filled at the previous
   close with zero volume and `is_gap=True`; off-grid timestamps raise.
+
+Stage 1 invariants baked into `quantharness.backtest` (rules R1–R6 in the rulebook are frozen once
+any strategy has been evaluated):
+- Strategies are called once per bar, in order, with only that bar's feature `dict` (warmup `nan`s
+  included); the engine's only transformation of the signal is `strategy.sanitize` (non-finite →
+  0, clip to [-1, 1]). Never pass bars/history/position to a strategy.
+- `pos[t]` is filled at `close[t]` and earns `close[t] → close[t+1]`; turnover is charged at `t`.
+- The buy-and-hold benchmark is the constant strategy `1.0` run through the same `_simulate` path,
+  never a separate calculation. Annualization factor is fixed at 8760.
 
 **Non-negotiable constraints from the doc** (any implementation work must preserve these, not just
 follow them by convention):
