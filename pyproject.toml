@@ -53,6 +53,12 @@ full = [
     "swe-rex>=1.4.0",
     "mini-swe-agent[modal]",
     "mini-swe-agent[contree]",
+    "mini-swe-agent[quant]",
+]
+
+quant = [
+    "pandas>=2.2",
+    "numpy>=1.26",
 ]
 
 modal = [
@@ -75,6 +81,7 @@ dev = [
     "mkdocs-redirects",
     "portkey-ai",
     "swe-rex",
+    "mini-swe-agent[quant]",
 ]
 
 contree = [
@@ -100,7 +107,7 @@ version = {attr = "minisweagent.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["minisweagent*"]
+include = ["minisweagent*", "quantharness*"]
 
 [tool.setuptools.package-data]
 minisweagent = ["config/**/*"]
