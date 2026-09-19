@@ -1,0 +1,175 @@
+# Stage 3 research harness. Layer on top of mini.yaml (tool calls) or mini_textbased.yaml:
+#   -c mini.yaml -c quant_research.yaml
+#   -c mini_textbased.yaml -c quant_research.yaml --model-class litellm_textbased
+# The prompt is data-agnostic on purpose: the same text is used for synthetic and real data, and
+# tests reject any wording that hints at what kind of edge exists (design/stage3-research-harness.md R2).
+agent:
+  agent_class: minisweagent.agents.extra.quant_research.QuantResearchAgent
+  step_limit: 80
+  # litellm reports cost 0 for local Ollama models, so this limit only binds for paid APIs.
+  cost_limit: 5.0
+  wall_time_limit_seconds: 3600
+  instance_template: |
+    {{task}}
+
+    ## Your job
+
+    Write a trading strategy file at `/workspace/strategy.py` that passes the promotion gate.
+    You work alone, inside a sandbox, with a fixed budget of gate queries. Iterate: write the file,
+    backtest it yourself on the training data, inspect the results, improve, and only then spend a
+    gate query. Nothing outside this message will be explained to you.
+
+    Your context window is limited and every command plus its output stays in it. Get a first simple
+    strategy through `gate check` and a train-segment score within your first few steps, then improve
+    it; long exploratory analysis before any scored attempt has run out of room every time.
+
+    ## Strategy interface
+
+    ```python
+    def generate_signal(features: dict) -> float:
+        ...
+    ```
+
+    - Called once per hourly bar with that bar's features only. No history, no prices, no state.
+    - Return the target position as a fraction of equity: `1.0` = fully long, `-1.0` = fully short, `0.0` = flat.
+      Values outside `[-1, 1]` are clipped; `nan`/`inf` are treated as `0.0`.
+    - During warm-up some features are `nan` and are passed to you as-is. Handle them (e.g. return `0.0`).
+    - The position you return at bar t is filled at that bar's close and earns the return to the next close.
+      Each unit of position change costs 15 bps (fee + slippage). Trading every bar is expensive.
+
+    ## Features (keys of the `features` dict)
+
+    | key            | definition                                        | nan for first N bars |
+    |----------------|---------------------------------------------------|----------------------|
+    | ret_1          | log(close[t] / close[t-1])                        | 1                    |
+    | ret_24         | log(close[t] / close[t-24])                       | 24                   |
+    | sma_20_ratio   | close[t] / mean(close[t-19..t]) - 1               | 19                   |
+    | sma_50_ratio   | close[t] / mean(close[t-49..t]) - 1               | 49                   |
+    | vol_24         | sample std of the last 24 values of ret_1         | 24                   |
+    | vol_168        | sample std of the last 168 values of ret_1        | 168                  |
+    | range_1        | (high[t] - low[t]) / close[t]                     | 0                    |
+    | vol_ratio_24   | volume[t] / mean(volume[t-23..t])                 | 23                   |
+
+    ## Purity rules (enforced by static analysis and runtime checks; violations are rejected)
+
+    - Imports: only `math` and `typing`. Nothing else, no exceptions.
+    - Forbidden calls anywhere: `open`, `exec`, `eval`, `compile`, `__import__`, `getattr`, `setattr`, `delattr`,
+      `globals`, `locals`, `vars`, `input`, `print`, `breakpoint`. No attribute whose name starts and ends with `__`.
+    - No `global` / `nonlocal`. At module level only `import`, `def`, `class`, and constants like `THRESHOLD = 0.01`
+      (numbers, strings, booleans, None, tuples of those). No module-level lists, dicts or sets.
+    - Exactly one `generate_signal(features)` with exactly one positional parameter.
+    - The function must be pure: same input, same output, regardless of call order. Hidden state (mutable default
+      arguments, closures, caches) is detected by evaluating the bars in shuffled order and is rejected.
+
+    ## Data and tools
+
+    - `/workspace` is writable. Put your strategy at `/workspace/strategy.py`.
+    - `/data/train/BTCUSDT.csv`, `/data/train/ETHUSDT.csv`, `/data/train/SOLUSDT.csv` are readable hourly OHLCV bars
+      (columns: ts, open_time, open, high, low, close, volume, is_gap). Never print raw rows with `head`/`cat`/`tail`:
+      numeric text is extremely expensive for your context and tells you nothing the feature table above does not.
+      Load them with `load_ohlcv` and print small summaries instead. Keep every command's output short.
+    - Validation data exists but you cannot read it; you can only ask the gate to score against it.
+    - There is no holdout data in this container and there is no network.
+    - `python` has the `quantharness` library available. Minimal self-backtest on the training data:
+
+    ```python
+    import json
+    from pathlib import Path
+    from quantharness.data import load_ohlcv
+    from quantharness.features import compute_features
+    from quantharness.backtest import run_backtest
+    from quantharness.strategy import load_strategy
+
+    bars = load_ohlcv(Path("/data/train/BTCUSDT.csv"))
+    result = run_backtest(bars, compute_features(bars), load_strategy(Path("/workspace/strategy.py")))
+    print(json.dumps(result.report(), indent=2))   # strategy vs benchmark: sharpe, total_return, max_drawdown, ...
+    # result.series has per-bar columns pos, turnover, gross, cost, net, equity
+    ```
+
+    ## The gate (run with sudo exactly as shown)
+
+    The gate has exactly these three subcommands and nothing else (there is no `submit`, `validate`, `run` or `test`):
+
+    - `sudo -n /gate/bin/gate check /workspace/strategy.py` — purity checks only. Free. Use it before every score.
+    - `sudo -n /gate/bin/gate score /workspace/strategy.py --segment train` — full evaluation on training data. Free.
+    - `sudo -n /gate/bin/gate score /workspace/strategy.py` — full evaluation on validation data. **Costs one query.**
+    - `sudo -n /gate/bin/gate budget` — remaining validation queries.
+
+    The gate prints one JSON object. `"pass": true` with exit code 0 means promoted. Every criterion is relative to
+    buy-and-hold on the same period; there are no absolute thresholds, so "always long" cannot pass:
+
+    - `relative_sharpe`: your Sharpe must exceed buy-and-hold Sharpe by the margin shown.
+    - `regimes`: your return must be non-negative in each market regime that occurs (bull / bear / sideways).
+    - `beta`: |correlation with buy-and-hold| must not exceed the limit shown.
+    - `net_return`: total return after costs must be positive.
+    - `cross_asset`: the same file, unchanged, must also beat buy-and-hold on ETHUSDT and SOLUSDT.
+    - `purity`: the rules above.
+
+    ## Budget
+
+    You have {{ gate_budget | default(20) }} validation queries for this whole session. A query is spent whenever
+    the gate evaluates validation data, pass or fail. Purity failures, `check`, and `--segment train` are free.
+    When the budget reaches 0 the gate refuses further validation queries and this session ends.
+
+    ## Finishing
+
+    Only after a validation `score` returned `"pass": true`, finish by running exactly:
+    {% if action_format == "textbased" %}
+    ```mswea_bash_command
+    echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+    ```
+    {% else %}
+    `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (as the only command of that step)
+    {% endif %}
+    The file at `/workspace/strategy.py` at that moment is your submission; it must be byte-identical to the file
+    that passed. Submitting without a passing validation score counts as failure.
+
+    ## Command execution rules
+
+    - Every response must contain reasoning followed by {% if action_format == "textbased" %}exactly one bash code block
+      (```mswea_bash_command ... ```){% else %}at least one bash tool call{% endif %}.
+    - Each command runs in a fresh subshell in `/workspace`; `cd` and environment variables do not persist between steps.
+    - Create files with heredocs, e.g. `cat <<'EOF' > /workspace/strategy.py ... EOF`. View files with `nl -ba file | sed -n '1,40p'`.
+
+    <system_information>
+    {{system}} {{release}} {{version}} {{machine}}
+    </system_information>
+model:
+  # Local Ollama models report cost 0, which the default tracker treats as "unregistered model".
+  cost_tracking: ignore_errors
+  # Thinking models replay ~700 tokens of reasoning per step otherwise; measured on qwen3.6 via
+  # Ollama, that filled a 16k context by step 12 and silently truncated the task prompt away.
+  replay_reasoning: false
+  # Cap observations at 3000 chars (mini.yaml allows 10000): raw CSV rows and long tracebacks were
+  # the main context hogs in the first trajectories.
+  observation_template: |
+    {%- if output.output | length < 3000 -%}
+    {
+      "returncode": {{ output.returncode }},
+      "output": {{ output.output | tojson }}
+      {%- if output.exception_info %}, "exception_info": {{ output.exception_info | tojson }}{% endif %}
+    }
+    {%- else -%}
+    {
+      "returncode": {{ output.returncode }},
+      "output_head": {{ output.output[:1500] | tojson }},
+      "output_tail": {{ output.output[-1500:] | tojson }},
+      "elided_chars": {{ output.output | length - 3000 }},
+      "warning": "Output too long; print less."
+      {%- if output.exception_info %}, "exception_info": {{ output.exception_info | tojson }}{% endif %}
+    }
+    {%- endif -%}
+  model_kwargs:
+    # Ollama's default context window (4096) is too small for this prompt plus a thinking model's
+    # reasoning: generation stops with finish_reason=length before any tool call is produced.
+    # num_ctx is Ollama-only (dropped for cloud APIs via drop_params); raise it if VRAM allows.
+    num_ctx: 24576
+    max_tokens: 8192
+environment:
+  environment_class: docker
+  image: quantharness-gate:synthetic
+  cwd: /workspace
+  timeout: 300
+  run_args: ["--rm", "--network", "none", "--memory", "2g", "--cpus", "2", "--pids-limit", "256"]
+gate:
+  budget: 20

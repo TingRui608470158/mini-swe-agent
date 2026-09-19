@@ -4,8 +4,10 @@ Every criterion is relative to buy-and-hold or a sign test; there are no absolut
 Validation queries consume a per-run budget; anything that fails purity does not.
 """
 
+import hashlib
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -39,11 +41,18 @@ class GateConfig:
 
 @dataclass
 class Budget:
+    """Per-run validation budget plus the root-only log of every validation score (Stage 3 R3)."""
+
     path: Path
+
+    @property
+    def scores_path(self) -> Path:
+        return self.path.with_name("scores.jsonl")
 
     def init(self, remaining: int) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps({"remaining": remaining}))
+        self.scores_path.write_text("")
 
     def remaining(self) -> int:
         return json.loads(self.path.read_text())["remaining"]
@@ -52,6 +61,16 @@ class Budget:
         remaining = self.remaining() - 1
         self.path.write_text(json.dumps({"remaining": remaining}))
         return remaining
+
+    def record(self, strategy: Path, result: dict) -> None:
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "sha256": hashlib.sha256(strategy.read_bytes()).hexdigest(),
+            "pass": result["pass"],
+            "criteria": result["criteria"],
+        }
+        with self.scores_path.open("a") as f:
+            f.write(json.dumps(entry) + "\n")
 
 
 def load_segment(segments_dir: Path, name: str, symbol: str, bounds: Bounds) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -183,6 +202,8 @@ def score(
         )
     remaining = budget.consume() if gated else budget.remaining()
     result = evaluate(strategy, segment, segments_dir, bounds, cfg)
+    if gated:
+        budget.record(strategy, result)
     payload = {
         "segment": segment,
         "symbol": cfg.symbol,

@@ -102,10 +102,14 @@ for crypto (BTC/USDT, 1h bars). Implementation lives in the separate top-level p
 `src/quantharness/` (tests in `tests/quantharness/`, run with `pytest tests/quantharness`); it
 depends on the `quant` extra (`pip install -e '.[quant]'`, pandas + numpy). Stage 0 (shared
 feature library, `design/stage0-feature-library.md`), Stage 1 (deterministic backtest engine,
-`design/stage1-backtest-engine.md`) and Stage 2 (promotion gate, `design/stage2-promotion-gate.md`,
-container files in `docker/gate/`) are implemented; Stage 2.5+ is not. Container isolation tests
-(`tests/quantharness/test_gate_container.py`, marked `slow`) need a running Docker daemon and skip
-otherwise.
+`design/stage1-backtest-engine.md`), Stage 2 (promotion gate, `design/stage2-promotion-gate.md`,
+container files in `docker/gate/`), Stage 2.5 minimal (`quantharness/synthetic.py`) and Stage 3
+(research harness, `design/stage3-research-harness.md`: `minisweagent/run/extra/quant_research.py`,
+`minisweagent/agents/extra/quant_research.py`, `minisweagent/config/extra/quant_research.yaml`) are
+implemented; Stage 3.5+ is not. Docker-backed tests (`tests/quantharness/test_gate_container.py`,
+`tests/run/test_quant_research_container.py`, marked `slow`) need a running Docker daemon and skip
+otherwise. Local models: use `ollama_chat/<model>`; if tool calling is flaky, layer
+`-c mini_textbased.yaml -c quant_research.yaml --model-class litellm_textbased`.
 Read the full design doc before doing any work related to it; do not re-derive its plan from
 memory since it may be updated. What follows is only a pointer/summary, not a substitute for
 reading it.
@@ -141,6 +145,17 @@ Stage 2 invariants baked into `quantharness.gate` / `purity` / `split`:
 - Isolation is filesystem/container level (`/data/validation` root-only, `/data/holdout` not
   mounted, `sudo` limited to `/gate/bin/gate`, `--network none`). Do not "fix" agent access by
   changing `DockerEnvironment`; change the image/mounts.
+
+Stage 3 invariants baked into `minisweagent/run/extra/quant_research.py`:
+- The run verdict (`decide()`) never trusts the agent: `PASS` requires the sha256 of
+  `/workspace/strategy.py` to match the last entry in the gate's root-only `scores.jsonl` with
+  `pass: true`. Anything the agent printed or claimed is irrelevant.
+- The prompt in `quant_research.yaml` is data-agnostic and identical for synthetic and real data;
+  `tests/run/test_quant_research.py` rejects wording that hints at the planted edge (the regex
+  list only grows). Don't add "helpful hints" about market behaviour to the prompt.
+- Five sandbox probes run as the agent before step 1 and abort the run (`ERROR`) on any breach.
+- `DefaultAgent` and `DockerEnvironment` are used unmodified; the only agent addition is
+  `QuantResearchAgent.execute_actions` parsing gate output to stop on an exhausted budget.
 
 **Non-negotiable constraints from the doc** (any implementation work must preserve these, not just
 follow them by convention):

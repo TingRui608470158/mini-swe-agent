@@ -44,6 +44,9 @@ class LitellmModelConfig(BaseModel):
     """Template used to render the observation after executing an action."""
     multimodal_regex: str = ""
     """Regex to extract multimodal content. Empty string disables multimodal processing."""
+    replay_reasoning: bool = True
+    """Send previous `reasoning_content` back to the API. Disable for thinking models with a small
+    context window (e.g. local Ollama), where replayed reasoning quickly fills the context."""
 
 
 class LitellmModel:
@@ -74,7 +77,8 @@ class LitellmModel:
             raise e
 
     def _prepare_messages_for_api(self, messages: list[dict]) -> list[dict]:
-        prepared = [{k: v for k, v in msg.items() if k != "extra"} for msg in messages]
+        dropped = {"extra"} if self.config.replay_reasoning else {"extra", "reasoning_content"}
+        prepared = [{k: v for k, v in msg.items() if k not in dropped} for msg in messages]
         prepared = _reorder_anthropic_thinking_blocks(prepared)
         return set_cache_control(prepared, mode=self.config.set_cache_control)
 

@@ -94,3 +94,12 @@ class TestLitellmModel:
         model = LitellmModel(model_name="gpt-4")
         result = model.format_observation_messages({"extra": {}}, [])
         assert result == []
+
+    @pytest.mark.parametrize(
+        ("replay_reasoning", "expected_keys"),
+        [(True, {"role", "content", "reasoning_content"}), (False, {"role", "content"})],
+    )
+    def test_replay_reasoning_controls_what_is_sent_back(self, replay_reasoning, expected_keys):
+        model = LitellmModel(model_name="gpt-4", replay_reasoning=replay_reasoning)
+        messages = [{"role": "assistant", "content": "x", "reasoning_content": "long thoughts", "extra": {"cost": 0}}]
+        assert set(model._prepare_messages_for_api(messages)[0]) == expected_keys

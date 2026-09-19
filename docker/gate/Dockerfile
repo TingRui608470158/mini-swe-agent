@@ -1,5 +1,7 @@
-# Build context = repo root. Requires `python -m quantharness.split data/ build/segments/` first.
-#   docker build -f docker/gate/Dockerfile -t quantharness-gate .
+# Build context = repo root. Requires `python -m quantharness.split <raw csv dir> build/segments/` first.
+#   real data:      python -m quantharness.split data/raw build/segments
+#   synthetic data: python -m quantharness.synthetic build/synthetic_raw && python -m quantharness.split build/synthetic_raw build/segments
+#   docker build -f docker/gate/Dockerfile -t quantharness-gate[:synthetic] .
 #   docker run --network none --rm -it quantharness-gate bash
 FROM python:3.11-slim
 
@@ -21,7 +23,7 @@ COPY --chmod=0644 build/segments/split.json docker/gate/config.json /gate/
 COPY --chmod=0755 docker/gate/gate /gate/bin/gate
 COPY --chmod=0440 docker/gate/sudoers /etc/sudoers.d/gate
 RUN mkdir -m 0700 /gate/state \
-    && python -c "import json, pathlib; c = json.loads(pathlib.Path('/gate/config.json').read_text()); pathlib.Path('/gate/state/budget.json').write_text(json.dumps({'remaining': c['budget']}))" \
+    && python -c "import json, pathlib; c = json.loads(pathlib.Path('/gate/config.json').read_text()); pathlib.Path('/gate/state/budget.json').write_text(json.dumps({'remaining': c['budget']})); pathlib.Path('/gate/state/scores.jsonl').touch()" \
     && mkdir /workspace && chown agent:agent /workspace
 
 WORKDIR /workspace

@@ -7,11 +7,11 @@ import pytest
 from quantharness.data import normalize_ohlcv, save_ohlcv
 from quantharness.gate import GateConfig
 from quantharness.split import write_segments
+from quantharness.synthetic import SYMBOLS, ar1_bars, trend_bars
 
 N_BARS = 400
 GAP = slice(100, 103)
 DUPLICATED_VOLUME = 12345.0
-SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT")
 
 GOOD_STRATEGY = """import math
 
@@ -23,39 +23,6 @@ def generate_signal(features):
 # Volume is independent noise in the synthetic data, so this has no edge but trades every bar
 NOISE_STRATEGY = "def generate_signal(features):\n    return 1.0 if features['vol_ratio_24'] > 1 else -1.0\n"
 ALWAYS_LONG_STRATEGY = "def generate_signal(features):\n    return 1.0\n"
-
-
-def bars_from_log_returns(returns: np.ndarray, seed: int) -> pd.DataFrame:
-    rng = np.random.default_rng(seed)
-    close = 100 * np.exp(np.cumsum(returns))
-    open_ = np.concatenate([close[:1], close[:-1]])
-    ts = pd.date_range("2021-01-01", periods=len(returns), freq="1h", tz="UTC", name="ts")
-    return normalize_ohlcv(
-        pd.DataFrame(
-            {
-                "open": open_,
-                "high": np.maximum(open_, close) * 1.001,
-                "low": np.minimum(open_, close) * 0.999,
-                "close": close,
-                "volume": rng.uniform(100, 1000, len(returns)),
-            },
-            index=ts,
-        )
-    )
-
-
-def ar1_bars(seed: int, n: int = 10_000, phi: float = 0.6, sigma: float = 0.01) -> pd.DataFrame:
-    """Mean-reverting log returns r_t = -phi * r_{t-1} + eps: `-sign(ret_1)` is a real edge."""
-    eps = np.random.default_rng(seed).normal(0, sigma, n)
-    returns = np.zeros(n)
-    for t in range(1, n):
-        returns[t] = -phi * returns[t - 1] + eps[t]
-    return bars_from_log_returns(returns, seed)
-
-
-def trend_bars(seed: int, n: int = 10_000) -> pd.DataFrame:
-    """Strong drift: buy-and-hold has an absolute Sharpe far above any plausible threshold."""
-    return bars_from_log_returns(0.001 + np.random.default_rng(seed).normal(0, 0.005, n), seed)
 
 
 def build_segments(tmp_path: Path, make_bars) -> Path:

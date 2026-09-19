@@ -24,3 +24,11 @@ class UserInterruption(InterruptAgentFlow):
 
 class FormatError(InterruptAgentFlow):
     """Raised when the LM's output is not in the expected format."""
+
+
+class QueryBudgetExhausted(InterruptAgentFlow):
+    """Raised when the promotion gate's validation budget is used up without a pass."""
+
+
+class ContextExhausted(LimitsExceeded):
+    """Raised when the model's context window is about to overflow."""
