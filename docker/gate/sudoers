@@ -1,0 +1,3 @@
+Defaults env_reset
+Defaults secure_path="/usr/local/bin:/usr/bin:/bin"
+agent ALL=(root) NOPASSWD: /gate/bin/gate

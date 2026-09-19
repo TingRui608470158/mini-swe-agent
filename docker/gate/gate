@@ -1,0 +1,3 @@
+#!/bin/sh
+# The only command the agent may run as root (see sudoers). sudo's env_reset drops PYTHONPATH.
+exec env PYTHONPATH=/gate/src /usr/local/bin/python -m quantharness.gate "$@"

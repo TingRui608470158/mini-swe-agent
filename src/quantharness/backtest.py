@@ -60,14 +60,18 @@ def _simulate(close: np.ndarray, pos: np.ndarray, rate: float, index: pd.Index) 
     )
 
 
+def backtest_positions(bars: pd.DataFrame, pos: np.ndarray, cost: CostModel = CostModel()) -> BacktestResult:
+    close = bars["close"].to_numpy(dtype="float64")
+    return BacktestResult(
+        series=_simulate(close, pos, cost.rate, bars.index),
+        benchmark=_simulate(close, np.ones_like(close), cost.rate, bars.index),
+        cost_model=cost,
+    )
+
+
 def run_backtest(
     bars: pd.DataFrame, features: pd.DataFrame, strategy: Strategy, cost: CostModel = CostModel()
 ) -> BacktestResult:
     if not features.index.equals(bars.index):
         raise ValueError("features and bars must share the same index")
-    close = bars["close"].to_numpy(dtype="float64")
-    return BacktestResult(
-        series=_simulate(close, _positions(features, strategy), cost.rate, bars.index),
-        benchmark=_simulate(close, _positions(features, lambda _: 1.0), cost.rate, bars.index),
-        cost_model=cost,
-    )
+    return backtest_positions(bars, _positions(features, strategy), cost)

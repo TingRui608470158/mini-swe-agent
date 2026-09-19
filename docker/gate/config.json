@@ -1,0 +1,10 @@
+{
+  "sharpe_margin": 0.5,
+  "max_abs_corr": 0.7,
+  "regime_window": 720,
+  "regime_threshold": 0.1,
+  "budget": 20,
+  "cross_symbols": ["ETHUSDT", "SOLUSDT"],
+  "timeout_seconds": 60,
+  "symbol": "BTCUSDT"
+}

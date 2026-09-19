@@ -101,8 +101,11 @@ built on top of this codebase** (branch `quanta_trade`): an offline/online quant
 for crypto (BTC/USDT, 1h bars). Implementation lives in the separate top-level package
 `src/quantharness/` (tests in `tests/quantharness/`, run with `pytest tests/quantharness`); it
 depends on the `quant` extra (`pip install -e '.[quant]'`, pandas + numpy). Stage 0 (shared
-feature library, `design/stage0-feature-library.md`) and Stage 1 (deterministic backtest engine,
-rulebook in `design/stage1-backtest-engine.md`) are implemented; Stage 2+ is not.
+feature library, `design/stage0-feature-library.md`), Stage 1 (deterministic backtest engine,
+`design/stage1-backtest-engine.md`) and Stage 2 (promotion gate, `design/stage2-promotion-gate.md`,
+container files in `docker/gate/`) are implemented; Stage 2.5+ is not. Container isolation tests
+(`tests/quantharness/test_gate_container.py`, marked `slow`) need a running Docker daemon and skip
+otherwise.
 Read the full design doc before doing any work related to it; do not re-derive its plan from
 memory since it may be updated. What follows is only a pointer/summary, not a substitute for
 reading it.
@@ -125,6 +128,19 @@ any strategy has been evaluated):
 - `pos[t]` is filled at `close[t]` and earns `close[t] → close[t+1]`; turnover is charged at `t`.
 - The buy-and-hold benchmark is the constant strategy `1.0` run through the same `_simulate` path,
   never a separate calculation. Annualization factor is fixed at 8760.
+
+Stage 2 invariants baked into `quantharness.gate` / `purity` / `split`:
+- Strategy code never executes in the gate process; `purity.sandboxed_positions` runs it in a
+  subprocess with a timeout and compares sequential / permuted-order / re-imported runs bit for bit.
+  Static analysis (`purity.check_static`) is an import **allowlist** (`math`, `typing`), not a denylist.
+- Every promotion criterion is relative to buy-and-hold or a sign test. Never add an absolute
+  threshold: on real data the validation-period B&H Sharpe was 3.1, which would wave through
+  "always long".
+- The validation budget is consumed iff validation data is read; purity failures, `check`, and
+  train-segment scores are free. Budget exhaustion is checked before the strategy file is opened.
+- Isolation is filesystem/container level (`/data/validation` root-only, `/data/holdout` not
+  mounted, `sudo` limited to `/gate/bin/gate`, `--network none`). Do not "fix" agent access by
+  changing `DockerEnvironment`; change the image/mounts.
 
 **Non-negotiable constraints from the doc** (any implementation work must preserve these, not just
 follow them by convention):
