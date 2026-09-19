@@ -31,7 +31,8 @@ def _run(image: str, command: str) -> subprocess.CompletedProcess:
 
 def test_agent_cannot_read_validation_or_see_holdout(image):
     assert _run(image, "id -un").stdout.strip() == "agent"
-    assert _run(image, "head -c 1 /data/train/BTCUSDT.csv").returncode == 0
+    features = "from pathlib import Path; from quantharness.data import load_ohlcv; from quantharness.features import compute_features; print(compute_features(load_ohlcv(Path('/data/train/BTCUSDT.csv'))).shape[1])"
+    assert _run(image, f'python -c "{features}"').stdout.strip() == "8"
     assert "Permission denied" in _run(image, "cat /data/validation/BTCUSDT.csv").stderr
     assert "No such file" in _run(image, "ls /data/holdout").stderr
 
@@ -43,7 +44,8 @@ def test_agent_cannot_tamper_with_gate_or_budget(image):
 
 
 def test_agent_can_only_reach_gate_through_sudo(image):
-    assert '"budget_remaining": 20' in _run(image, "sudo -n /gate/bin/gate budget").stdout
+    gate = _run(image, "sudo -n /gate/bin/gate budget")
+    assert '"budget_remaining": 20' in gate.stdout and gate.stderr == ""
     assert _run(image, "sudo -n cat /data/validation/BTCUSDT.csv").returncode != 0
     assert _run(image, "sudo -n python -c 'print(1)'").returncode != 0
 

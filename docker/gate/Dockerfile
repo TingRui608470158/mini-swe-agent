@@ -13,7 +13,9 @@ ENV PYTHONPATH=/gate/src
 # train is readable by the agent; validation only by root (the gate); holdout is never copied in.
 COPY --chmod=0644 build/segments/train /data/train
 COPY build/segments/validation /data/validation
-RUN chmod 0700 /data/validation && chmod 0600 /data/validation/*
+# --chmod=0644 also strips the execute bit from directories, which would block traversal
+RUN find /gate /data -type d -exec chmod 0755 {} + \
+    && chmod 0700 /data/validation && chmod 0600 /data/validation/*
 
 COPY --chmod=0644 build/segments/split.json docker/gate/config.json /gate/
 COPY --chmod=0755 docker/gate/gate /gate/bin/gate
