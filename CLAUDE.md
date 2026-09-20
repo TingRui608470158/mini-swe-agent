@@ -110,7 +110,10 @@ container files in `docker/gate/`), Stage 2.5 minimal (`quantharness/synthetic.p
 (research harness, `design/stage3-research-harness.md`: `minisweagent/run/extra/quant_research.py`,
 `minisweagent/agents/extra/quant_research.py`, `minisweagent/config/extra/quant_research.yaml`) are
 implemented, plus the Stage 3.5 batch report tool (`minisweagent/run/extra/quant_research_report.py`,
-rulebook `design/stage3.5-real-data.md`); Stage 4+ is not. During a real-data batch (Stage 3.5 R2)
+rulebook `design/stage3.5-real-data.md`); Stage 4+ is not. **The project is paused after Stage 3.5**
+(2026-09-20): no candidate passed, one open lead (perp funding rate) — see
+`reports/project-summary-2026-09-20.md` for the closing record and the re-open procedure before
+starting any new quant work. During a real-data batch (Stage 3.5 R2)
 do not change `quant_research.yaml` or `quantharness/` — fix harness issues data-agnostically, re-pass
 the synthetic acceptance, then start a new batch. Docker-backed tests (`tests/quantharness/test_gate_container.py`,
 `tests/run/test_quant_research_container.py`, marked `slow`) need a running Docker daemon and skip
@@ -137,8 +140,16 @@ python -m minisweagent.run.extra.quant_research_report runs/ --image real   # ->
 ```
 
 `scripts/rule_search.py` brute-forces threshold rules on the train segment only (with a
-shifted-returns null) to check whether an edge exists in the features at all; its output lives in
-`reports/rule-search*.md`. `reports/` is the human-readable record for each Stage 3.5 batch.
+shifted-returns null) to check whether an edge exists in the features at all; `freq_search.py`
+(4h/1d resampling), `cross_search.py` (cross-asset relative features) and `flow_search.py` (kline
+order-flow fields, cost sweep 0–15 bps) are the same test in other directions. `reports/` is the
+human-readable record for each Stage 3.5 batch; `reports/feature-search-2026-09-20.md` records that
+none of these directions beat the null even at 0 bps, and the decision to stop feature iteration —
+read it before proposing new OHLCV- or kline-derived features. Use ≥ 10 null shifts, not 3.
+`scripts/perp_search.py` (perp funding rate / premium index) is the one direction that did beat the
+null (BTC only, fails C6, sparse capitulation-buying signal); the report's tier-1 addendum has the
+robustness checks and the re-open-vs-wrap-up fork. Re-opening means a Stage 0 schema change (v3)
+through the design doc first — never a gate-criteria change.
 
 Stage 0 invariants baked into `quantharness` (don't break them):
 - Bars are keyed by **close time** (`ts` = `open_time + 1h`, UTC); a feature dated `ts` only sees
