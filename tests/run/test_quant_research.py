@@ -13,6 +13,7 @@ from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models.test_models import DeterministicModel, make_output
 from minisweagent.run.extra.quant_research import PROBES, decide, judge_probes
 from quantharness.data import load_ohlcv
+from quantharness.features import FEATURE_NAMES
 from quantharness.synthetic import SYMBOLS
 
 GOOD = b"def generate_signal(f):\n    return 0.0\n"
@@ -142,10 +143,14 @@ def test_prompt_is_data_agnostic_and_complete(action_format):
     ):
         assert required in text
     assert ("mswea_bash_command" in text) == (action_format == "textbased")
+    assert all(f"| {name} " in text for name in FEATURE_NAMES), "feature table drifted from FEATURE_NAMES"
 
 
-def test_synthetic_cli_writes_three_distinct_loadable_symbols(tmp_path):
-    subprocess.run([sys.executable, "-m", "quantharness.synthetic", str(tmp_path), "--n", "500"], check=True)
+@pytest.mark.parametrize("kind", ["ar1", "regime"])
+def test_synthetic_cli_writes_three_distinct_loadable_symbols(tmp_path, kind):
+    subprocess.run(
+        [sys.executable, "-m", "quantharness.synthetic", str(tmp_path), "--n", "500", "--kind", kind], check=True
+    )
     frames = [load_ohlcv(tmp_path / f"{s}.csv") for s in SYMBOLS]
     assert [len(f) for f in frames] == [500, 500, 500]
     assert len({f["close"].iloc[-1] for f in frames}) == 3

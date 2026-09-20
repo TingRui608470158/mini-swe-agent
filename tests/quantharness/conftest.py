@@ -7,9 +7,9 @@ import pytest
 from quantharness.data import normalize_ohlcv, save_ohlcv
 from quantharness.gate import GateConfig
 from quantharness.split import write_segments
-from quantharness.synthetic import SYMBOLS, ar1_bars, trend_bars
+from quantharness.synthetic import SYMBOLS, ar1_bars, regime_bars, trend_bars
 
-N_BARS = 400
+N_BARS = 1000
 GAP = slice(100, 103)
 DUPLICATED_VOLUME = 12345.0
 
@@ -23,6 +23,14 @@ def generate_signal(features):
 # Volume is independent noise in the synthetic data, so this has no edge but trades every bar
 NOISE_STRATEGY = "def generate_signal(features):\n    return 1.0 if features['vol_ratio_24'] > 1 else -1.0\n"
 ALWAYS_LONG_STRATEGY = "def generate_signal(features):\n    return 1.0\n"
+VOL_REGIME_STRATEGY = """import math
+
+def generate_signal(features):
+    ratio = features["volatility_ratio_24_168"]
+    if math.isnan(ratio):
+        return 0.0
+    return 1.0 if ratio > 1.0 else -1.0
+"""
 
 
 def build_segments(tmp_path: Path, make_bars) -> Path:
@@ -40,6 +48,11 @@ def ar1_segments(tmp_path_factory) -> Path:
 @pytest.fixture(scope="session")
 def trend_segments(tmp_path_factory) -> Path:
     return build_segments(tmp_path_factory.mktemp("trend"), trend_bars)
+
+
+@pytest.fixture(scope="session")
+def regime_segments(tmp_path_factory) -> Path:
+    return build_segments(tmp_path_factory.mktemp("regime"), regime_bars)
 
 
 @pytest.fixture

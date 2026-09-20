@@ -5,7 +5,7 @@ from typer.testing import CliRunner
 
 from quantharness.gate import Budget, GateConfig, app, evaluate, purity_check
 from quantharness.split import load_bounds
-from tests.quantharness.conftest import ALWAYS_LONG_STRATEGY, GOOD_STRATEGY, NOISE_STRATEGY
+from tests.quantharness.conftest import ALWAYS_LONG_STRATEGY, GOOD_STRATEGY, NOISE_STRATEGY, VOL_REGIME_STRATEGY
 
 CRITERIA = ("purity", "relative_sharpe", "regimes", "beta", "net_return", "cross_asset")
 
@@ -31,6 +31,15 @@ def test_real_edge_passes_and_noise_fails(ar1_segments, strategy_file, gate_conf
     assert set(good["criteria"]["cross_asset"]["value"]) == {"ETHUSDT", "SOLUSDT"}
     noise = _evaluate(ar1_segments, strategy_file(NOISE_STRATEGY, "noise.py"), gate_config)
     assert noise["pass"] is False and noise["criteria"]["net_return"]["pass"] is False
+
+
+def test_volatility_regime_edge_passes_and_noise_fails(regime_segments, strategy_file, gate_config):
+    """Stage 2.5 for feature set v2: the planted regime edge is findable through the new features."""
+    good = _evaluate(regime_segments, strategy_file(VOL_REGIME_STRATEGY, "regime.py"), gate_config)
+    assert good["pass"] is True
+    assert {name: c["pass"] for name, c in good["criteria"].items()} == dict.fromkeys(CRITERIA, True)
+    assert good["criteria"]["relative_sharpe"]["benchmark"] < 1  # buy-and-hold has nothing to offer here
+    assert _evaluate(regime_segments, strategy_file(NOISE_STRATEGY, "noise.py"), gate_config)["pass"] is False
 
 
 def test_purity_check_runs_on_train_and_reports_violations(ar1_segments, strategy_file, gate_config):

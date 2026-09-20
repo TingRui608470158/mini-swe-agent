@@ -52,25 +52,57 @@ def test_features_do_not_depend_on_future_bars(ohlcv):
         ("vol_168", 168),
         ("range_1", 0),
         ("vol_ratio_24", 23),
+        ("volatility_ratio_24_168", 168),
+        ("volatility_720", 720),
+        ("volatility_ratio_24_720", 720),
+        ("hl_pos_168", 167),
+        ("hl_pos_720", 719),
+        ("volume_ratio_168", 167),
+        ("range_ratio_24", 23),
+        ("hour_utc", 0),
+        ("weekday_utc", 0),
     ],
 )
 def test_schema_and_warmup(ohlcv, name, warmup):
     features = compute_features(ohlcv)
-    assert tuple(features.columns) == FEATURE_NAMES
+    assert tuple(features.columns) == FEATURE_NAMES and len(ohlcv) > LOOKBACK
     assert features[name].dtype == "float64"
     assert features[name].iloc[:warmup].isna().all()
     assert features[name].iloc[warmup:].notna().all()
 
 
 def test_values_against_hand_computation():
-    flat = compute_features_at(
-        _bars(open=[4.0] * 200, high=[5.0] * 200, low=[3.0] * 200, close=[4.0] * 200, volume=[2.0] * 200)
-    )
-    assert flat == dict.fromkeys(FEATURE_NAMES, 0.0) | {"range_1": 0.5, "vol_ratio_24": 1.0}
+    bars = _bars(open=[4.0] * 800, high=[5.0] * 800, low=[3.0] * 800, close=[4.0] * 800, volume=[2.0] * 800)
+    flat = compute_features_at(bars)
+    # Constant price: every return/deviation is exactly 0, so volatility ratios are 0/0 -> nan.
+    nan_keys = {"volatility_ratio_24_168", "volatility_ratio_24_720"}
+    assert all(np.isnan(flat[k]) for k in nan_keys)
+    expected = dict.fromkeys(FEATURE_NAMES, 0.0) | {
+        "range_1": 0.5,
+        "vol_ratio_24": 1.0,
+        "hl_pos_168": 0.5,
+        "hl_pos_720": 0.5,
+        "volume_ratio_168": 1.0,
+        "range_ratio_24": 1.0,
+        "hour_utc": float(bars.index[-1].hour),
+        "weekday_utc": float(bars.index[-1].weekday()),
+    }
+    assert {k: v for k, v in flat.items() if k not in nan_keys} == {
+        k: v for k, v in expected.items() if k not in nan_keys
+    }
     spike = compute_features_at(
         _bars(open=[1.0] * 25, high=[1.0] * 25, low=[1.0] * 25, close=[1.0] * 24 + [21.0], volume=[1.0] * 24 + [25.0])
     )
     assert spike["sma_20_ratio"] == 9.5
     assert spike["vol_ratio_24"] == 12.5
     assert spike["ret_1"] == spike["ret_24"] == pytest.approx(np.log(21))
-    assert np.isnan(spike["sma_50_ratio"]) and np.isnan(spike["vol_168"])
+    assert np.isnan(spike["sma_50_ratio"]) and np.isnan(spike["vol_168"]) and np.isnan(spike["hl_pos_168"])
+    assert np.isnan(spike["range_ratio_24"])  # all ranges are 0 -> 0/0
+
+
+def test_hl_pos_and_calendar_features():
+    bars = _bars(open=[2.0] * 200, high=[3.0] * 200, low=[1.0] * 200, close=[2.0] * 199 + [3.0], volume=[1.0] * 200)
+    features = compute_features(bars)
+    assert features["hl_pos_168"].iloc[-2] == 0.5 and features["hl_pos_168"].iloc[-1] == 1.0
+    assert (features["hour_utc"] == bars.index.hour).all() and (features["weekday_utc"] == bars.index.weekday).all()
+    assert set(features["hour_utc"]) == set(range(24)) and set(features["weekday_utc"]) == set(range(7))

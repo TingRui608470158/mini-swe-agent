@@ -24,7 +24,10 @@ Run a single test file / test:
 ```bash
 pytest tests/agents/test_default.py
 pytest tests/agents/test_default.py::test_name -v
+pytest -m "not slow"                          # skip Docker-backed tests
 ```
+
+`print` statements in tests are fine; don't flag them.
 
 Lint/format (also runs automatically via pre-commit on commit):
 
@@ -106,7 +109,10 @@ feature library, `design/stage0-feature-library.md`), Stage 1 (deterministic bac
 container files in `docker/gate/`), Stage 2.5 minimal (`quantharness/synthetic.py`) and Stage 3
 (research harness, `design/stage3-research-harness.md`: `minisweagent/run/extra/quant_research.py`,
 `minisweagent/agents/extra/quant_research.py`, `minisweagent/config/extra/quant_research.yaml`) are
-implemented; Stage 3.5+ is not. Docker-backed tests (`tests/quantharness/test_gate_container.py`,
+implemented, plus the Stage 3.5 batch report tool (`minisweagent/run/extra/quant_research_report.py`,
+rulebook `design/stage3.5-real-data.md`); Stage 4+ is not. During a real-data batch (Stage 3.5 R2)
+do not change `quant_research.yaml` or `quantharness/` — fix harness issues data-agnostically, re-pass
+the synthetic acceptance, then start a new batch. Docker-backed tests (`tests/quantharness/test_gate_container.py`,
 `tests/run/test_quant_research_container.py`, marked `slow`) need a running Docker daemon and skip
 otherwise. Local models: use `ollama_chat/<model>`; if tool calling is flaky, layer
 `-c mini_textbased.yaml -c quant_research.yaml --model-class litellm_textbased`.
@@ -114,12 +120,37 @@ Read the full design doc before doing any work related to it; do not re-derive i
 memory since it may be updated. What follows is only a pointer/summary, not a substitute for
 reading it.
 
+Quant workflow (build context is the repo root; the image tag is the *only* thing that differs
+between synthetic and real data):
+
+```bash
+pip install -e '.[quant]'
+# synthetic image (Stage 3 acceptance)
+python -m quantharness.synthetic build/synthetic_raw && python -m quantharness.split build/synthetic_raw build/segments
+docker build -f docker/gate/Dockerfile -t quantharness-gate:synthetic .
+# real image (Stage 3.5) — raw CSVs in data/raw/ are frozen; don't re-download
+python -m quantharness.split data/raw build/segments
+docker build -f docker/gate/Dockerfile -t quantharness-gate:real .
+# one research run (writes runs/<id>/), then the batch report (reads runs/ only)
+python -m minisweagent.run.extra.quant_research -m ollama_chat/qwen3.6:latest --image quantharness-gate:synthetic
+python -m minisweagent.run.extra.quant_research_report runs/ --image real   # -> reports/stage3.5-<batch>.md
+```
+
+`scripts/rule_search.py` brute-forces threshold rules on the train segment only (with a
+shifted-returns null) to check whether an edge exists in the features at all; its output lives in
+`reports/rule-search*.md`. `reports/` is the human-readable record for each Stage 3.5 batch.
+
 Stage 0 invariants baked into `quantharness` (don't break them):
 - Bars are keyed by **close time** (`ts` = `open_time + 1h`, UTC); a feature dated `ts` only sees
   bars with index <= `ts`.
 - `features._core` is the single implementation for both `compute_features` (batch/offline) and
   `compute_features_at` (single-bar/online); it truncates to the trailing `LOOKBACK` bars itself.
   Never add a vectorized (`rolling()`) fast path — it breaks bit-exact offline/online parity.
+- Feature set is v2 (17 features, `LOOKBACK = 721`; see the v2 section of the Stage 0 rulebook).
+  `FEATURE_NAMES` order is the schema: append, never reorder/rename. Any schema change means
+  regenerating segments/images and re-running the synthetic Stage 3 acceptance (both `ar1` and
+  `regime` sets) before a new real-data batch. The prompt's feature table is checked against
+  `FEATURE_NAMES` by `tests/run/test_quant_research.py`.
 - `data.load_ohlcv` uses `float_precision="round_trip"`; the default CSV parser is not bit-exact.
 - Gap policy is fixed in `data.normalize_ohlcv`: missing hourly bars are filled at the previous
   close with zero volume and `is_gap=True`; off-grid timestamps raise.

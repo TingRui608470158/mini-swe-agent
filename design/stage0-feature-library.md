@@ -62,3 +62,24 @@
 ## 完成後銜接
 
 Stage 1（確定性回測引擎）直接把本階段的特徵函式庫當作輸入依賴之一：`策略(features) + 特徵(本階段產出) + 手續費滑價模型 → 績效報告`。因此本階段的輸出 schema 一旦被 Stage 1 消費，就等同凍結——之後若要改動特徵定義或 schema，需要連帶檢視 Stage 1 及以後所有依賴它的階段。
+
+## 特徵集 v2（2026-09-20 修訂）
+
+**動機**：Stage 3.5 批次 1 判定情境 C，且窮舉檢查（`scripts/rule_search.py`，5,840 條規則）顯示原 8 個特徵中只有波動度條件帶有任何資訊、價格方向特徵完全缺席（`reports/rule-search.md`）。決定**保留原 8 個、新增 9 個**波動度結構與時間季節性特徵，仍全部為單標的、純 OHLCV + 時間戳、point-in-time。
+
+| 名稱 | 定義 | warmup |
+|---|---|---|
+| `volatility_ratio_24_168` | `vol_24 / vol_168`（分母 0 → nan） | 168 |
+| `volatility_720` | 最近 720 個 `ret_1` 的樣本標準差 | 720 |
+| `volatility_ratio_24_720` | `vol_24 / volatility_720` | 720 |
+| `hl_pos_168` | `(c − min(low[-168:])) / (max(high[-168:]) − min(low[-168:]))`，[0,1]，分母 0 → nan | 167 |
+| `hl_pos_720` | 同上，720 根 | 719 |
+| `volume_ratio_168` | `v / mean(v[-168:])` | 167 |
+| `range_ratio_24` | `range_1 / mean(range_1[-24:])` | 23 |
+| `hour_utc` | 收盤時間 `ts` 的 UTC 小時 | 0 |
+| `weekday_utc` | 收盤時間 `ts` 的星期（0=Mon） | 0 |
+
+- `LOOKBACK` 169 → **721**：所有段檔的 warmup 隨之變長，切段與映像必須重建。
+- `FEATURE_NAMES` 順序即 schema；原 8 個名稱與順序不變，新特徵接在後面。命名用 `volatility_*` / `volume_*` 全名，避免既有 `vol_24`（波動度）/`vol_ratio_24`（成交量）的歧義擴散。
+- 合成驗收集新增 `synthetic.regime_bars`：兩態波動度 regime、漂移正負對稱（B&H ≈ 0），已知答案 `+1 if volatility_ratio_24_168 > 1.0 else −1`，由 `tests/quantharness/test_gate.py` 證明可通過關卡、噪音策略被擋。
+- schema 變更後的重驗鏈：Stage 0–2 全部測試 → Stage 3 合成驗收（AR(1) 與 regime 兩個集各 ≥ 2/3）→ 窮舉檢查 → 才開真實資料新批次（Stage 3.5 R2）。

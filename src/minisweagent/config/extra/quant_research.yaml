@@ -49,6 +49,18 @@ agent:
     | vol_168        | sample std of the last 168 values of ret_1        | 168                  |
     | range_1        | (high[t] - low[t]) / close[t]                     | 0                    |
     | vol_ratio_24   | volume[t] / mean(volume[t-23..t])                 | 23                   |
+    | volatility_ratio_24_168 | vol_24 / vol_168                         | 168                  |
+    | volatility_720 | sample std of the last 720 values of ret_1        | 720                  |
+    | volatility_ratio_24_720 | vol_24 / volatility_720                  | 720                  |
+    | hl_pos_168     | (close[t] - min(low[t-167..t])) / (max(high[t-167..t]) - min(low[t-167..t])), in [0, 1] | 167 |
+    | hl_pos_720     | same over the last 720 bars                       | 719                  |
+    | volume_ratio_168 | volume[t] / mean(volume[t-167..t])              | 167                  |
+    | range_ratio_24 | range_1[t] / mean(range_1[t-23..t])               | 23                   |
+    | hour_utc       | UTC hour of the bar's close time, 0-23            | 0                    |
+    | weekday_utc    | weekday of the bar's close time, 0 = Monday .. 6 = Sunday | 0            |
+
+    All keys are always present; a value is `nan` only during warm-up. Ratios whose denominator is zero are `nan`.
+    Features are known at the bar's close; your signal decides the position held over the *next* bar.
 
     ## Purity rules (enforced by static analysis and runtime checks; violations are rejected)
 

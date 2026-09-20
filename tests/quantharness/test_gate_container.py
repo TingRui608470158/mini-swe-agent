@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from quantharness.features import FEATURE_NAMES
+
 REPO = Path(__file__).resolve().parents[2]
 IMAGE = "quantharness-gate-test"
 
@@ -32,7 +34,7 @@ def _run(image: str, command: str) -> subprocess.CompletedProcess:
 def test_agent_cannot_read_validation_or_see_holdout(image):
     assert _run(image, "id -un").stdout.strip() == "agent"
     features = "from pathlib import Path; from quantharness.data import load_ohlcv; from quantharness.features import compute_features; print(compute_features(load_ohlcv(Path('/data/train/BTCUSDT.csv'))).shape[1])"
-    assert _run(image, f'python -c "{features}"').stdout.strip() == "8"
+    assert _run(image, f'python -c "{features}"').stdout.strip() == str(len(FEATURE_NAMES))
     assert "Permission denied" in _run(image, "cat /data/validation/BTCUSDT.csv").stderr
     assert "No such file" in _run(image, "ls /data/holdout").stderr
 
