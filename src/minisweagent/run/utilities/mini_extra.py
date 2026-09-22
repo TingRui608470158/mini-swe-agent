@@ -16,6 +16,8 @@ subcommands = [
     ("minisweagent.run.benchmarks.swebench", ["swebench"], "Evaluate on SWE-bench (batch mode)"),
     ("minisweagent.run.benchmarks.swebench_single", ["swebench-single"], "Evaluate on SWE-bench (single instance)"),
     ("minisweagent.run.benchmarks.programbench", ["programbench"], "Run on ProgramBench (batch mode)"),
+    ("minisweagent.run.extra.vault_audit", ["vault-audit"], "Run scheduled audit tasks of an Obsidian vault"),
+    ("minisweagent.run.extra.vault_check", ["vault-check"], "Deterministic checks for an Obsidian vault"),
 ]
 
 

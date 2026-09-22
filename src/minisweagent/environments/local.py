@@ -14,6 +14,9 @@ class LocalEnvironmentConfig(BaseModel):
     cwd: str = ""
     env: dict[str, str] = {}
     timeout: int = 30
+    shell: list[str] = []
+    """Run commands with this program instead of the system shell, e.g. ["C:/Program Files/Git/bin/bash.exe", "-c"]
+    to get bash on Windows."""
 
 
 class LocalEnvironment:
@@ -26,7 +29,7 @@ class LocalEnvironment:
         command = action.get("command", "")
         cwd = cwd or self.config.cwd or os.getcwd()
         try:
-            result = _run(command, cwd, os.environ | self.config.env, timeout or self.config.timeout)
+            result = _run(command, cwd, os.environ | self.config.env, timeout or self.config.timeout, self.config.shell)
             output = {"output": result.stdout, "returncode": result.returncode, "exception_info": ""}
         except Exception as e:
             raw_output = getattr(e, "output", None)
@@ -69,11 +72,13 @@ class LocalEnvironment:
         }
 
 
-def _run(command: str, cwd: str, env: dict[str, str], timeout: int) -> subprocess.CompletedProcess[str]:
+def _run(
+    command: str, cwd: str, env: dict[str, str], timeout: int, shell: list[str] = ()
+) -> subprocess.CompletedProcess[str]:
     """Like subprocess.run, but kills the whole process group on timeout so no children are orphaned."""
     process = subprocess.Popen(
-        command,
-        shell=True,
+        [*shell, command] if shell else command,
+        shell=not shell,
         text=True,
         cwd=cwd,
         env=env,

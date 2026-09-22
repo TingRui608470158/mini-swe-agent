@@ -1,0 +1,88 @@
+# Config for `mini-extra vault-audit` (run/extra/vault_audit.py): one agent run per task note.
+# Template variables set by the runner: task (note body), task_name, date, vault, report_path.
+agent:
+  system_template: |
+    你是團隊 Obsidian vault（以 git 版控）的稽核助手。你透過 bash 指令檢查 vault，
+    最後產出一份給管理員閱讀的繁體中文報告。
+    你只能讀取與分析 vault；除了寫入指定的報告檔之外，不得修改、刪除、移動任何檔案，也不得執行 git commit/push/checkout/reset。
+  instance_template: |
+    ## 任務：{{task_name}}（{{date}}）
+
+    {{task}}
+
+    ## 環境
+
+    - 目前工作目錄就是 vault 根目錄 `{{vault}}`，每個指令都在新的 subshell 執行，`cd` 不會保留。
+    - 內建檢查工具會輸出 JSON，請先執行它再自行查證：
+      - `python -m minisweagent.run.extra.vault_check all --since 1.day`
+      - 子命令 `deletions` / `conflicts` / `frontmatter` / `placement`，皆可加 `--since <git 時間>`（例如 `--since 3.day`）
+    - 追查細節可用 `git log --stat`, `git show <commit> -- <path>`, `git diff`, `cat`, `grep` 等指令。
+    - 團隊規則寫在 `README.md`，成員對照表在 `20-areas/vault-management/audit/settings.md`。
+
+    ## 報告要求
+
+    - 以 heredoc 寫到 `{{report_path}}`：`cat <<'EOF' > "{{report_path}}"`，全文使用繁體中文。
+    - 檔案開頭必須是這段 frontmatter：
+      ```
+      ---
+      author: vault-audit
+      date: {{date}}
+      updated: {{date}}
+      tags:
+        - audit
+      task: {{task_name}}
+      ---
+      ```
+    - 內容依序為四個區段：`## 摘要`（一到三句話）、`## 🔴 需管理員處理`、`## 🟡 提醒成員`、`## ✅ 正常項目`；沒有內容的區段寫「無」。
+    - 每個項目都要列出檔案路徑、相關 commit 與作者、以及你的判斷依據；無法確定的放在 🟡 並說明原因。
+    - 工具的原始 JSON 不要整段貼進報告；報告是給人看的摘要。
+    - 檔案路徑、commit hash、作者名稱一律從指令輸出原樣複製，不要自行改寫或翻譯。
+    - 報告寫完後用 `cat` 確認內容，然後單獨執行 `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` 結束任務。
+
+    ## 指令規則
+
+    - 每次回覆都要包含至少一個 bash tool call，並簡短說明你在做什麼。
+    - 結束指令必須單獨執行，不能和其他指令合併。
+  step_limit: 40
+  cost_limit: 0
+environment:
+  timeout: 120
+  env:
+    PAGER: cat
+    GIT_PAGER: cat
+    PYTHONIOENCODING: utf-8
+model:
+  model_kwargs:
+    drop_params: true
+  cost_tracking: ignore_errors
+  observation_template: |
+    {%- if output.output | length < 10000 -%}
+    {
+      "returncode": {{ output.returncode }},
+      "output": {{ output.output | tojson }}
+      {%- if output.exception_info %}, "exception_info": {{ output.exception_info | tojson }}{% endif %}
+    }
+    {%- else -%}
+    {
+      "returncode": {{ output.returncode }},
+      "output_head": {{ output.output[:5000] | tojson }},
+      "output_tail": {{ output.output[-5000:] | tojson }},
+      "elided_chars": {{ output.output | length - 10000 }},
+      "warning": "Output too long."
+      {%- if output.exception_info %}, "exception_info": {{ output.exception_info | tojson }}{% endif %}
+    }
+    {%- endif -%}
+  format_error_template: |
+    {% if finish_reason is defined and (finish_reason == "length" or (finish_reason == "tool_calls" and not has_tool_calls)) -%}
+    Your previous response reached the output token limit (finish_reason={{ finish_reason }}) before you produced a tool call, so it was cut off. Respond more concisely and finish with exactly one bash tool call. If you need to think more, do so briefly.
+    {%- else -%}
+    Tool call error:
+
+    <error>
+    {{error}}
+    </error>
+
+    Every response needs to use the 'bash' tool at least once to execute commands.
+    Call the bash tool with your command as the argument: Tool: bash, Arguments: {"command": "your_command_here"}
+    If you want to end the task, run `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` on its own.
+    {%- endif %}

@@ -149,3 +149,5 @@ model:
     {%- endif %}
   model_kwargs:
     drop_params: true
+    api_base: "http://192.168.1.199:11434"
+  cost_tracking: "ignore_errors"

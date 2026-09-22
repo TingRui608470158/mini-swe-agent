@@ -262,3 +262,12 @@ def test_local_environment_shell_features():
     result = env.execute({"command": "echo $(echo 'nested')"})
     assert result["returncode"] == 0
     assert "nested" in result["output"]
+
+
+def test_local_environment_custom_shell():
+    """Commands go through the configured shell program instead of the system shell."""
+    env = LocalEnvironment(shell=[sys.executable, "-c"])
+    result = env.execute({"command": "import sys; print('via', sys.argv[0] or 'python')"})
+    assert result["returncode"] == 0 and "via" in result["output"]
+    assert env.execute({"command": "raise SystemExit(3)"})["returncode"] == 3
+    assert env.execute({"command": "import time; time.sleep(5)"}, timeout=1)["returncode"] == -1
